@@ -30,13 +30,15 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Database connection
 const db = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: Number(process.env.DB_PORT),
+  ssl: {
+    rejectUnauthorized: true,
+  },
+  connectTimeout: 10000,
 });
 
 // Test database connection
@@ -77,8 +79,8 @@ app.use('/api/search', searchRoutes);
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error(err.stack);
-    res.status(500).json({ 
-        success: false, 
+    res.status(500).json({
+        success: false,
         message: 'Something went wrong!',
         error: process.env.NODE_ENV === 'development' ? err.message : {}
     });
