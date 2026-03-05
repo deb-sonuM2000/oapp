@@ -6,7 +6,7 @@ router.get('/', async (req, res) => {
     try {
         const db = req.app.locals.db;
         const [rows] = await db.promise().query(
-            'SELECT id, name, name_odia, capital,area_km2,population,description,description_odia, image_url FROM districts ORDER BY name'
+            'SELECT id, name, name_odia, capital,area_km2,population,description,description_odia,history,history_odia,famous_for,famous_for_odia, image_url FROM districts ORDER BY name'
         );
         res.json({ success: true, data: rows });
     } catch (error) {
