@@ -28,6 +28,9 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Also serve from /images for backward compatibility
+app.use('/images', express.static(path.join(__dirname, 'uploads')));
+
 // Database connection
 const db = mysql.createPool({
   host: process.env.DB_HOST,
@@ -61,6 +64,7 @@ const cuisineRoutes = require('./routes/cuisine');
 const fighterRoutes = require('./routes/fighters');
 const danceRoutes = require('./routes/dance');
 const literatureRoutes = require('./routes/literature');
+const uploadRoutes = require('./routes/upload');
 //const authRoutes = require('./routes/auth');
 const searchRoutes = require('./routes/search');
 //const galleryRoutes = require('./routes/gallery');
@@ -72,6 +76,7 @@ app.use('/api/cuisine', cuisineRoutes);
 app.use('/api/fighters', fighterRoutes);
 app.use('/api/dance', danceRoutes);
 app.use('/api/literature', literatureRoutes);
+app.use('/api/upload', uploadRoutes);
 //app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
 //app.use('/api/gallery', galleryRoutes);
