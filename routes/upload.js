@@ -72,6 +72,9 @@ router.post('/', upload.single('image'), async (req, res) => {
       case 'fighters':
         query = 'UPDATE freedom_fighters SET image_url = ? WHERE id = ?';
         break;
+      case 'history':
+        query = 'UPDATE history_timeline SET image_url = ? WHERE id = ?';
+        break;
       case 'dance':
         query = 'UPDATE odissi_dance SET image_url = ? WHERE id = ?';
         break;
@@ -112,6 +115,9 @@ router.get('/:entity_type/:entity_id', async (req, res) => {
         break;
       case 'fighters':
         query = 'SELECT image_url FROM freedom_fighters WHERE id = ?';
+        break;
+      case 'history':
+        query = 'SELECT image_url FROM history_timeline WHERE id = ?';
         break;
       case 'dance':
         query = 'SELECT image_url FROM odissi_dance WHERE id = ?';
