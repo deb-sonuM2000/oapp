@@ -418,4 +418,4 @@ router.post('/reset-password', [
     }
 });
 
-module.exports = { router, verifyToken };
+module.exports = router;
