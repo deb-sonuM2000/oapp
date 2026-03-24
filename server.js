@@ -65,7 +65,7 @@ const fighterRoutes = require('./routes/fighters');
 const danceRoutes = require('./routes/dance');
 const literatureRoutes = require('./routes/literature');
 const uploadRoutes = require('./routes/upload');
-//const authRoutes = require('./routes/auth');
+const authRoutes = require('./routes/auth');
 const searchRoutes = require('./routes/search');
 //const galleryRoutes = require('./routes/gallery');
 
@@ -77,7 +77,7 @@ app.use('/api/fighters', fighterRoutes);
 app.use('/api/dance', danceRoutes);
 app.use('/api/literature', literatureRoutes);
 app.use('/api/upload', uploadRoutes);
-//app.use('/api/auth', authRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
 //app.use('/api/gallery', galleryRoutes);
 
