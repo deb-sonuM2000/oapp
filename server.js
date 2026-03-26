@@ -67,6 +67,7 @@ const literatureRoutes = require('./routes/literature');
 const uploadRoutes = require('./routes/upload');
 const authRoutes = require('./routes/auth');
 const searchRoutes = require('./routes/search');
+const videoUploadRoutes = require('./routes/video_upload');
 //const galleryRoutes = require('./routes/gallery');
 
 // Use routes
@@ -79,6 +80,7 @@ app.use('/api/literature', literatureRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/video-upload', videoUploadRoutes);
 //app.use('/api/gallery', galleryRoutes);
 
 // Error handling middleware
