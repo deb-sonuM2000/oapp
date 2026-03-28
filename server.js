@@ -68,6 +68,7 @@ const uploadRoutes = require('./routes/upload');
 const authRoutes = require('./routes/auth');
 const searchRoutes = require('./routes/search');
 const videoUploadRoutes = require('./routes/video_upload');
+const mapRoutes = require('./routes/map');
 //const galleryRoutes = require('./routes/gallery');
 
 // Use routes
@@ -81,6 +82,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/video-upload', videoUploadRoutes);
+app.use('/api/map', mapRoutes);
 //app.use('/api/gallery', galleryRoutes);
 
 // Error handling middleware
