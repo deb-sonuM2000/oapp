@@ -69,6 +69,9 @@ const authRoutes = require('./routes/auth');
 const searchRoutes = require('./routes/search');
 const videoUploadRoutes = require('./routes/video_upload');
 const mapRoutes = require('./routes/map');
+const dailyHistoryRoutes = require('./routes/daily_history');
+const nationalSymbolsRoutes = require('./routes/national_symbols');
+
 //const galleryRoutes = require('./routes/gallery');
 
 // Use routes
@@ -83,6 +86,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/video-upload', videoUploadRoutes);
 app.use('/api/map', mapRoutes);
+app.use('/api/daily-history', dailyHistoryRoutes);
+app.use('/api/national-symbols', nationalSymbolsRoutes);
 //app.use('/api/gallery', galleryRoutes);
 
 // Error handling middleware
