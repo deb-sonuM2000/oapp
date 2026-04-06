@@ -72,7 +72,7 @@ const mapRoutes = require('./routes/map');
 const dailyHistoryRoutes = require('./routes/daily_history');
 const nationalSymbolsRoutes = require('./routes/national_symbols');
 const notificationsRoutes = require('./routes/notifications');
-const festivalRoutes = require('./routes/festivals');
+const festivalRoutes = require('./routes/festival');
 
 //const galleryRoutes = require('./routes/gallery');
 
