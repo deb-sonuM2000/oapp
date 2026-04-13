@@ -73,6 +73,7 @@ const dailyHistoryRoutes = require('./routes/daily_history');
 const nationalSymbolsRoutes = require('./routes/national_symbols');
 const notificationsRoutes = require('./routes/notifications');
 const festivalRoutes = require('./routes/festival');
+const languageRoutes = require('./routes/language');
 
 //const galleryRoutes = require('./routes/gallery');
 
@@ -92,6 +93,7 @@ app.use('/api/daily-history', dailyHistoryRoutes);
 app.use('/api/national-symbols', nationalSymbolsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/festivals', festivalRoutes);
+app.use('/api/language', languageRoutes);
 //app.use('/api/gallery', galleryRoutes);
 
 // Error handling middleware
