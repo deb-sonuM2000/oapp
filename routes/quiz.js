@@ -5,6 +5,7 @@ const router = express.Router();
 // Get all available quizzes
 router.get('/', async (req, res) => {
     try {
+        const db = req.app.locals.db;
         const userId = req.query.user_id || null;
         
         const [quizzes] = await db.query(
@@ -29,6 +30,7 @@ router.get('/', async (req, res) => {
 // Get quiz by ID with questions
 router.get('/:id', async (req, res) => {
     try {
+        const db = req.app.locals.db;
         const quizId = req.params.id;
         
         // Get quiz details
@@ -62,6 +64,7 @@ router.get('/:id', async (req, res) => {
 // Submit quiz answers
 router.post('/:id/submit', async (req, res) => {
     try {
+        const db = req.app.locals.db;
         const quizId = req.params.id;
         const { user_id, answers, time_taken } = req.body;
         
@@ -159,6 +162,7 @@ router.post('/:id/submit', async (req, res) => {
 // Get user quiz stats
 router.get('/stats/:userId', async (req, res) => {
     try {
+        const db = req.app.locals.db;
         const userId = req.params.userId;
         
         // Get user stats
@@ -212,6 +216,7 @@ router.get('/stats/:userId', async (req, res) => {
 // Get leaderboard
 router.get('/leaderboard/top', async (req, res) => {
     try {
+        const db = req.app.locals.db;
         const limit = req.query.limit || 50;
         
         const [leaderboard] = await db.query(
