@@ -2,6 +2,11 @@
 const express = require('express');
 const router = express.Router();
 
+function getPromiseDb(req) {
+    return req.app.locals.db.promise();
+}
+
+
 // Get all available quizzes
 router.get('/', async (req, res) => {
     try {
@@ -70,14 +75,16 @@ router.get('/:id', async (req, res) => {
 // Submit quiz answers
 router.post('/:id/submit', async (req, res) => {
     try {
-        const db = req.app.locals.db;
-        const promiseDb = db.promise();
+        const promiseDb = getPromiseDb(req);
         const quizId = req.params.id;
         const { user_id, answers, time_taken } = req.body;
         
         if (!user_id || !answers) {
             return res.status(400).json({ success: false, message: 'Missing required fields' });
         }
+        
+        // Start transaction
+        await promiseDb.query('START TRANSACTION');
         
         // Get quiz details
         const [quiz] = await promiseDb.query(
@@ -86,10 +93,11 @@ router.post('/:id/submit', async (req, res) => {
         );
         
         if (quiz.length === 0) {
+            await promiseDb.query('ROLLBACK');
             return res.status(404).json({ success: false, message: 'Quiz not found' });
         }
         
-        // Get all questions for this quiz
+        // Get all questions
         const [questions] = await promiseDb.query(
             'SELECT * FROM quiz_questions WHERE quiz_id = ?',
             [quizId]
@@ -97,7 +105,6 @@ router.post('/:id/submit', async (req, res) => {
         
         let score = 0;
         let correctCount = 0;
-        const answerDetails = [];
         
         // Calculate score
         for (const question of questions) {
@@ -108,12 +115,6 @@ router.post('/:id/submit', async (req, res) => {
                 score += question.points;
                 correctCount++;
             }
-            
-            answerDetails.push({
-                question_id: question.id,
-                selected_answer: userAnswer,
-                is_correct: isCorrect
-            });
         }
         
         const totalPossible = questions.length * (quiz[0].points_per_question || 10);
@@ -124,29 +125,37 @@ router.post('/:id/submit', async (req, res) => {
             `INSERT INTO user_quiz_attempts 
              (user_id, quiz_id, score, total_possible, percentage, time_taken) 
              VALUES (?, ?, ?, ?, ?, ?)`,
-            [user_id, quizId, score, totalPossible, percentage, time_taken]
+            [user_id, quizId, score, totalPossible, percentage, time_taken || 0]
         );
         
-        const attemptId = attemptResult.insertId;
+        // Check if user stats exist
+        const [existingStats] = await promiseDb.query(
+            'SELECT * FROM user_quiz_stats WHERE user_id = ?',
+            [user_id]
+        );
         
-        // Save individual answers
-        for (const answer of answerDetails) {
+        if (existingStats.length === 0) {
+            // Create new stats
             await promiseDb.query(
-                `INSERT INTO user_quiz_answers 
-                 (attempt_id, question_id, selected_answer, is_correct) 
-                 VALUES (?, ?, ?, ?)`,
-                [attemptId, answer.question_id, answer.selected_answer, answer.is_correct]
+                `INSERT INTO user_quiz_stats 
+                 (user_id, total_quizzes_taken, total_points_earned, correct_answers, total_answers)
+                 VALUES (?, 1, ?, ?, ?)`,
+                [user_id, score, correctCount, questions.length]
+            );
+        } else {
+            // Update existing stats
+            await promiseDb.query(
+                `UPDATE user_quiz_stats SET
+                 total_quizzes_taken = total_quizzes_taken + 1,
+                 total_points_earned = total_points_earned + ?,
+                 correct_answers = correct_answers + ?,
+                 total_answers = total_answers + ?
+                 WHERE user_id = ?`,
+                [score, correctCount, questions.length, user_id]
             );
         }
         
-        // Update user stats
-        await updateUserStats(promiseDb,user_id, score, correctCount, questions.length);
-        
-        // Check and award badges
-        const earnedBadges = await checkAndAwardBadges(promiseDb,user_id);
-        
-        // Update leaderboard
-        await updateLeaderboard(promiseDb,user_id);
+        await promiseDb.query('COMMIT');
         
         res.json({
             success: true,
@@ -156,12 +165,18 @@ router.post('/:id/submit', async (req, res) => {
                 percentage: percentage,
                 correct_answers: correctCount,
                 total_questions: questions.length,
-                earned_badges: earnedBadges
+                earned_badges: []
             }
         });
         
     } catch (error) {
         console.error('Quiz submission error:', error);
+        try {
+            const promiseDb = getPromiseDb(req);
+            await promiseDb.query('ROLLBACK');
+        } catch (rollbackError) {
+            console.error('Rollback error:', rollbackError);
+        }
         res.status(500).json({ success: false, message: error.message });
     }
 });
