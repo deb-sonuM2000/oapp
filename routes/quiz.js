@@ -101,7 +101,7 @@ router.post('/:id/submit', async (req, res) => {
         
         // Calculate score
         for (const question of questions) {
-            const userAnswer = answers[question.id];
+            const userAnswer = answers[question.id.toString()];
             const isCorrect = userAnswer === question.correct_answer;
             
             if (isCorrect) {
@@ -244,7 +244,7 @@ router.get('/leaderboard/top', async (req, res) => {
 });
 
 // Helper functions
-async function updateUserStats(promiseDb,userId, pointsEarned, correctCount, totalQuestions) {
+async function updateUserStats(promiseDb, userId, pointsEarned, correctCount, totalQuestions) {
     const today = new Date().toISOString().split('T')[0];
     
     // Get current stats
@@ -260,12 +260,15 @@ async function updateUserStats(promiseDb,userId, pointsEarned, correctCount, tot
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toISOString().split('T')[0];
         
-        if (lastQuizDate === yesterdayStr) {
-            streak = currentStats[0].current_streak + 1;
-        } else if (lastQuizDate !== today) {
-            streak = 1;
-        } else {
-            streak = currentStats[0].current_streak;
+        if (lastQuizDate) {
+            const lastQuizDateStr = new Date(lastQuizDate).toISOString().split('T')[0];
+            if (lastQuizDateStr === yesterdayStr) {
+                streak = currentStats[0].current_streak + 1;
+            } else if (lastQuizDateStr !== today) {
+                streak = 1;
+            } else {
+                streak = currentStats[0].current_streak;
+            }
         }
     }
     
@@ -353,6 +356,14 @@ async function updateLeaderboard(userId) {
     );
     
     if (stats.length === 0) return;
+
+    // Get username
+    const [user] = await promiseDb.query(
+        'SELECT username FROM users WHERE id = ?',
+        [userId]
+    );
+    
+    const username = user.length > 0 ? user[0].username : `User_${userId}`;
     
     const accuracy = stats[0].total_answers > 0 
         ? (stats[0].correct_answers / stats[0].total_answers) * 100 
