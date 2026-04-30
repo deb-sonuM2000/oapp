@@ -2,182 +2,141 @@
 const express = require('express');
 const router = express.Router();
 
-function getPromiseDb(req) {
-    return req.app.locals.db.promise();
-}
-
-
-// Get all available quizzes
-router.get('/', async (req, res) => {
+// Get all quiz categories
+router.get('/categories', async (req, res) => {
     try {
         const db = req.app.locals.db;
-        const userId = req.query.user_id || null;
-
-           // Use .promise() to get Promise-based interface
-        const promiseDb = db.promise();
         
-        const [quizzes] = await promiseDb.query(
-            `SELECT q.*, 
-                    COUNT(qq.id) as question_count,
-                    (SELECT COUNT(*) FROM user_quiz_attempts WHERE quiz_id = q.id AND user_id = ?) as attempts_count,
-                    (SELECT MAX(percentage) FROM user_quiz_attempts WHERE quiz_id = q.id AND user_id = ?) as best_score
-             FROM quizzes q
-             LEFT JOIN quiz_questions qq ON q.id = qq.quiz_id
-             WHERE q.is_active = true
-             GROUP BY q.id
-             ORDER BY q.created_at DESC`,
-            [userId, userId]
+        const [rows] = await db.promise().query(
+            'SELECT * FROM quiz_categories WHERE is_active = true'
         );
-        
-        res.json({ success: true, data: quizzes });
+        res.json({ success: true, data: rows });
     } catch (error) {
-        console.error('Error in GET /api/quiz:', error);
+        console.error('Error fetching quiz categories:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-// Get quiz by ID with questions
-router.get('/:id', async (req, res) => {
+// Get random questions for a category
+router.get('/questions/:categoryId', async (req, res) => {
     try {
         const db = req.app.locals.db;
-        const promiseDb = db.promise();
-        const quizId = req.params.id;
+        const { categoryId } = req.params;
+        const { limit = 10, difficulty } = req.query;
         
-        // Get quiz details
-        const [quiz] = await promiseDb.query(
-            'SELECT * FROM quizzes WHERE id = ?',
-            [quizId]
-        );
+        let query = 'SELECT * FROM quiz_questions WHERE category_id = ? AND is_active = true';
+        const params = [categoryId];
         
-        if (quiz.length === 0) {
-            return res.status(404).json({ success: false, message: 'Quiz not found' });
+        if (difficulty) {
+            query += ' AND difficulty = ?';
+            params.push(difficulty);
         }
         
-        // Get questions
-        const [questions] = await promiseDb.query(
-            'SELECT * FROM quiz_questions WHERE quiz_id = ? ORDER BY question_order',
-            [quizId]
-        );
+        // Get random questions
+        query += ' ORDER BY RAND() LIMIT ?';
+        params.push(parseInt(limit));
         
-        res.json({
-            success: true,
-            data: {
-                quiz: quiz[0],
-                questions: questions
-            }
+        const [rows] = await db.promise().query(query, params);
+        
+        res.json({ 
+            success: true, 
+            data: rows,
+            total: rows.length 
         });
     } catch (error) {
-        console.error('Error in GET /api/quiz/:id:', error);
+        console.error('Error fetching quiz questions:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
 // Submit quiz answers
-router.post('/:id/submit', async (req, res) => {
+router.post('/submit', async (req, res) => {
+    const db = req.app.locals.db;
+    const connection = await db.promise().getConnection();
+    
     try {
-        const promiseDb = getPromiseDb(req);
-        const quizId = req.params.id;
-        const { user_id, answers, time_taken } = req.body;
+        await connection.beginTransaction();
         
-        if (!user_id || !answers) {
-            return res.status(400).json({ success: false, message: 'Missing required fields' });
-        }
-        
-        // Start transaction
-        await promiseDb.query('START TRANSACTION');
-        
-        // Get quiz details
-        const [quiz] = await promiseDb.query(
-            'SELECT * FROM quizzes WHERE id = ?',
-            [quizId]
-        );
-        
-        if (quiz.length === 0) {
-            await promiseDb.query('ROLLBACK');
-            return res.status(404).json({ success: false, message: 'Quiz not found' });
-        }
-        
-        // Get all questions
-        const [questions] = await promiseDb.query(
-            'SELECT * FROM quiz_questions WHERE quiz_id = ?',
-            [quizId]
-        );
+        const { 
+            user_id, 
+            category_id, 
+            answers, 
+            time_taken 
+        } = req.body;
         
         let score = 0;
-        let correctCount = 0;
+        let totalQuestions = answers.length;
         
         // Calculate score
-        for (const question of questions) {
-            const userAnswer = answers[question.id.toString()];
-            const isCorrect = userAnswer === question.correct_answer;
+        for (const answer of answers) {
+            const [question] = await connection.query(
+                'SELECT correct_answer, points FROM quiz_questions WHERE id = ?',
+                [answer.question_id]
+            );
             
+            const isCorrect = question[0].correct_answer === answer.selected_answer;
             if (isCorrect) {
-                score += question.points;
-                correctCount++;
+                score += question[0].points;
             }
         }
         
-        const totalPossible = questions.length * (quiz[0].points_per_question || 10);
-        const percentage = (score / totalPossible) * 100;
+        const percentage = (score / (totalQuestions * 10)) * 100;
         
         // Save attempt
-        const [attemptResult] = await promiseDb.query(
+        const [attempt] = await connection.query(
             `INSERT INTO user_quiz_attempts 
-             (user_id, quiz_id, score, total_possible, percentage, time_taken) 
+             (user_id, category_id, score, total_questions, percentage, time_taken) 
              VALUES (?, ?, ?, ?, ?, ?)`,
-            [user_id, quizId, score, totalPossible, percentage, time_taken || 0]
+            [user_id, category_id, score, totalQuestions, percentage, time_taken]
         );
         
-        // Check if user stats exist
-        const [existingStats] = await promiseDb.query(
-            'SELECT * FROM user_quiz_stats WHERE user_id = ?',
-            [user_id]
-        );
+        const attemptId = attempt.insertId;
         
-        if (existingStats.length === 0) {
-            // Create new stats
-            await promiseDb.query(
-                `INSERT INTO user_quiz_stats 
-                 (user_id, total_quizzes_taken, total_points_earned, correct_answers, total_answers)
-                 VALUES (?, 1, ?, ?, ?)`,
-                [user_id, score, correctCount, questions.length]
+        // Save individual answers
+        for (const answer of answers) {
+            const [question] = await connection.query(
+                'SELECT correct_answer FROM quiz_questions WHERE id = ?',
+                [answer.question_id]
             );
-        } else {
-            // Update existing stats
-            await promiseDb.query(
-                `UPDATE user_quiz_stats SET
-                 total_quizzes_taken = total_quizzes_taken + 1,
-                 total_points_earned = total_points_earned + ?,
-                 correct_answers = correct_answers + ?,
-                 total_answers = total_answers + ?
-                 WHERE user_id = ?`,
-                [score, correctCount, questions.length, user_id]
+            
+            const isCorrect = question[0].correct_answer === answer.selected_answer;
+            
+            await connection.query(
+                `INSERT INTO user_quiz_answers 
+                 (attempt_id, question_id, selected_answer, is_correct, time_taken_per_question) 
+                 VALUES (?, ?, ?, ?, ?)`,
+                [attemptId, answer.question_id, answer.selected_answer, isCorrect, answer.time_taken]
             );
         }
         
-        await promiseDb.query('COMMIT');
+        // Update user stats
+        await updateUserStats(connection, user_id, score, totalQuestions);
+        
+        // Check and award badges
+        const newBadges = await checkAndAwardBadges(connection, user_id);
+        
+        // Check and award titles
+        const newTitles = await checkAndAwardTitles(connection, user_id);
+        
+        await connection.commit();
         
         res.json({
             success: true,
             data: {
                 score: score,
-                total_possible: totalPossible,
+                total_questions: totalQuestions,
                 percentage: percentage,
-                correct_answers: correctCount,
-                total_questions: questions.length,
-                earned_badges: []
+                new_badges: newBadges,
+                new_titles: newTitles
             }
         });
         
     } catch (error) {
-        console.error('Quiz submission error:', error);
-        try {
-            const promiseDb = getPromiseDb(req);
-            await promiseDb.query('ROLLBACK');
-        } catch (rollbackError) {
-            console.error('Rollback error:', rollbackError);
-        }
+        await connection.rollback();
+        console.error('Error submitting quiz:', error);
         res.status(500).json({ success: false, message: error.message });
+    } finally {
+        connection.release();
     }
 });
 
@@ -185,223 +144,255 @@ router.post('/:id/submit', async (req, res) => {
 router.get('/stats/:userId', async (req, res) => {
     try {
         const db = req.app.locals.db;
-        const promiseDb = db.promise();
-        const userId = req.params.userId;
+        const { userId } = req.params;
         
-        // Get user stats
-        const [stats] = await promiseDb.query(
+        const [stats] = await db.promise().query(
             'SELECT * FROM user_quiz_stats WHERE user_id = ?',
             [userId]
         );
         
-        // Get recent attempts
-        const [recentAttempts] = await promiseDb.query(
-            `SELECT uqa.*, q.title, q.title_odia 
-             FROM user_quiz_attempts uqa
-             JOIN quizzes q ON uqa.quiz_id = q.id
-             WHERE uqa.user_id = ?
-             ORDER BY uqa.completed_at DESC
-             LIMIT 10`,
+        const [badges] = await db.promise().query(
+            `SELECT b.*, ub.earned_at 
+             FROM user_badges ub 
+             JOIN badges b ON ub.badge_id = b.id 
+             WHERE ub.user_id = ?`,
             [userId]
         );
         
-        // Get earned badges
-        const [badges] = await promiseDb.query(
-            `SELECT b.*, ub.earned_at 
-             FROM user_badges ub
-             JOIN badges b ON ub.badge_id = b.id
-             WHERE ub.user_id = ?
-             ORDER BY ub.earned_at DESC`,
+        const [titles] = await db.promise().query(
+            `SELECT t.*, ut.earned_at, ut.is_active 
+             FROM user_titles ut 
+             JOIN titles t ON ut.title_id = t.id 
+             WHERE ut.user_id = ?`,
+            [userId]
+        );
+        
+        const [recentQuizzes] = await db.promise().query(
+            `SELECT qc.name, qc.name_odia, uqa.percentage, uqa.score, uqa.completed_at 
+             FROM user_quiz_attempts uqa 
+             JOIN quiz_categories qc ON uqa.category_id = qc.id 
+             WHERE uqa.user_id = ? 
+             ORDER BY uqa.completed_at DESC 
+             LIMIT 5`,
             [userId]
         );
         
         res.json({
             success: true,
             data: {
-                stats: stats[0] || {
-                    total_quizzes_taken: 0,
-                    total_points_earned: 0,
-                    correct_answers: 0,
-                    total_answers: 0,
-                    current_streak: 0,
-                    best_streak: 0
-                },
-                recent_attempts: recentAttempts,
-                badges: badges
+                stats: stats[0] || {},
+                badges: badges,
+                titles: titles,
+                recentQuizzes: recentQuizzes
             }
         });
-        
     } catch (error) {
-        console.error('Error in GET /api/quiz/stats/:userId:', error);
+        console.error('Error fetching user quiz stats:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
 // Get leaderboard
-router.get('/leaderboard/top', async (req, res) => {
+router.get('/leaderboard', async (req, res) => {
     try {
         const db = req.app.locals.db;
-        const promiseDb = db.promise();
-        const limit = req.query.limit || 50;
+        const { limit = 10, category } = req.query;
         
-        const [leaderboard] = await promiseDb.query(
-            `SELECT user_id, user_name, total_points, quizzes_completed, accuracy
-             FROM leaderboard
-             ORDER BY total_points DESC
-             LIMIT ?`,
-            [parseInt(limit)]
-        );
+        let query = `
+            SELECT u.username, u.profile_image, 
+                   COALESCE(SUM(uqa.score), 0) as total_points,
+                   COUNT(DISTINCT uqa.id) as quizzes_taken,
+                   MAX(uqa.percentage) as best_score
+            FROM users u
+            LEFT JOIN user_quiz_attempts uqa ON u.id = uqa.user_id
+        `;
         
-        res.json({ success: true, data: leaderboard });
+        const params = [];
+        
+        if (category) {
+            query += ' AND uqa.category_id = ?';
+            params.push(category);
+        }
+        
+        query += ` GROUP BY u.id 
+                   ORDER BY total_points DESC 
+                   LIMIT ?`;
+        params.push(parseInt(limit));
+        
+        const [rows] = await db.promise().query(query, params);
+        
+        res.json({ success: true, data: rows });
     } catch (error) {
+        console.error('Error fetching leaderboard:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
 // Helper functions
-async function updateUserStats(promiseDb, userId, pointsEarned, correctCount, totalQuestions) {
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Get current stats
-    const [currentStats] = await promiseDb.query(
+async function updateUserStats(connection, userId, earnedPoints, questionsAttempted) {
+    // Get or create user stats
+    let [stats] = await connection.query(
         'SELECT * FROM user_quiz_stats WHERE user_id = ?',
         [userId]
     );
     
-    let streak = 1;
-    if (currentStats.length > 0) {
-        const lastQuizDate = currentStats[0].last_quiz_date;
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
-        
-        if (lastQuizDate) {
-            const lastQuizDateStr = new Date(lastQuizDate).toISOString().split('T')[0];
-            if (lastQuizDateStr === yesterdayStr) {
-                streak = currentStats[0].current_streak + 1;
-            } else if (lastQuizDateStr !== today) {
-                streak = 1;
-            } else {
-                streak = currentStats[0].current_streak;
-            }
-        }
+    if (stats.length === 0) {
+        await connection.query(
+            'INSERT INTO user_quiz_stats (user_id) VALUES (?)',
+            [userId]
+        );
+        [stats] = await connection.query(
+            'SELECT * FROM user_quiz_stats WHERE user_id = ?',
+            [userId]
+        );
     }
     
-    if (currentStats.length === 0) {
-        // Insert new stats
-        await promiseDb.query(
-            `INSERT INTO user_quiz_stats 
-             (user_id, total_quizzes_taken, total_points_earned, correct_answers, 
-              total_answers, current_streak, best_streak, last_quiz_date)
-             VALUES (?, 1, ?, ?, ?, ?, ?, ?)`,
-            [userId, pointsEarned, correctCount, totalQuestions, streak, streak, today]
-        );
+    const currentStats = stats[0];
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Update streak
+    let currentStreak = currentStats.current_streak;
+    if (currentStats.last_quiz_date === today) {
+        // Already played today, no streak change
+    } else if (currentStats.last_quiz_date === getPreviousDate(today)) {
+        currentStreak++;
     } else {
-        // Update existing stats
-        const newBestStreak = Math.max(streak, currentStats[0].best_streak);
-        await promiseDb.query(
-            `UPDATE user_quiz_stats SET
-             total_quizzes_taken = total_quizzes_taken + 1,
+        currentStreak = 1;
+    }
+    
+    const bestStreak = Math.max(currentStats.best_streak, currentStreak);
+    
+    await connection.query(
+        `UPDATE user_quiz_stats 
+         SET total_quizzes_taken = total_quizzes_taken + 1,
+             total_questions_answered = total_questions_answered + ?,
+             total_correct_answers = total_correct_answers + ?,
              total_points_earned = total_points_earned + ?,
-             correct_answers = correct_answers + ?,
-             total_answers = total_answers + ?,
              current_streak = ?,
              best_streak = ?,
              last_quiz_date = ?
-             WHERE user_id = ?`,
-            [pointsEarned, correctCount, totalQuestions, streak, newBestStreak, today, userId]
-        );
-    }
+         WHERE user_id = ?`,
+        [questionsAttempted, 0, earnedPoints, currentStreak, bestStreak, today, userId]
+    );
 }
 
-async function checkAndAwardBadges(userId) {
-    const earnedBadges = [];
+async function checkAndAwardBadges(connection, userId) {
+    const newBadges = [];
     
     // Get user stats
-    const [stats] = await promiseDb.query(
+    const [stats] = await connection.query(
         'SELECT * FROM user_quiz_stats WHERE user_id = ?',
         [userId]
     );
     
-    if (stats.length === 0) return earnedBadges;
+    const userStats = stats[0];
     
-    // Get all badges
-    const [badges] = await promiseDb.query('SELECT * FROM badges');
+    // Get already earned badges
+    const [earnedBadges] = await connection.query(
+        'SELECT badge_id FROM user_badges WHERE user_id = ?',
+        [userId]
+    );
+    const earnedBadgeIds = earnedBadges.map(b => b.badge_id);
     
-    for (const badge of badges) {
-        // Check if user already has this badge
-        const [hasBadge] = await promiseDb.query(
-            'SELECT * FROM user_badges WHERE user_id = ? AND badge_id = ?',
-            [userId, badge.id]
-        );
+    // Check all badges
+    const [allBadges] = await connection.query('SELECT * FROM badges');
+    
+    for (const badge of allBadges) {
+        if (earnedBadgeIds.includes(badge.id)) continue;
         
-        if (hasBadge.length > 0) continue;
-        
-        let qualifies = false;
+        let eligible = false;
         
         switch (badge.requirement_type) {
             case 'quiz_count':
-                qualifies = stats[0].total_quizzes_taken >= badge.requirement_value;
+                eligible = userStats.total_quizzes_taken >= badge.requirement_value;
                 break;
-            case 'total_points':
-                qualifies = stats[0].total_points_earned >= badge.requirement_value;
+            case 'perfect_scores':
+                // Check if user has any perfect score
+                const [perfectScores] = await connection.query(
+                    'SELECT COUNT(*) as count FROM user_quiz_attempts WHERE user_id = ? AND percentage = 100',
+                    [userId]
+                );
+                eligible = perfectScores[0].count >= badge.requirement_value;
                 break;
-            case 'streak':
-                qualifies = stats[0].best_streak >= badge.requirement_value;
+            case 'weekly_streak':
+                eligible = userStats.current_streak >= badge.requirement_value;
                 break;
         }
         
-        if (qualifies) {
-            await promiseDb.query(
+        if (eligible) {
+            await connection.query(
                 'INSERT INTO user_badges (user_id, badge_id) VALUES (?, ?)',
                 [userId, badge.id]
             );
-            earnedBadges.push(badge);
+            newBadges.push(badge);
         }
     }
     
-    return earnedBadges;
+    return newBadges;
 }
 
-async function updateLeaderboard(userId) {
+async function checkAndAwardTitles(connection, userId) {
+    const newTitles = [];
+    
     // Get user stats
-    const [stats] = await promiseDb.query(
+    const [stats] = await connection.query(
         'SELECT * FROM user_quiz_stats WHERE user_id = ?',
         [userId]
     );
     
-    if (stats.length === 0) return;
-
-    // Get username
-    const [user] = await promiseDb.query(
-        'SELECT username FROM users WHERE id = ?',
+    const userStats = stats[0];
+    
+    // Get already earned titles
+    const [earnedTitles] = await connection.query(
+        'SELECT title_id FROM user_titles WHERE user_id = ?',
         [userId]
     );
+    const earnedTitleIds = earnedTitles.map(t => t.title_id);
     
-    const username = user.length > 0 ? user[0].username : `User_${userId}`;
+    // Check all titles
+    const [allTitles] = await connection.query('SELECT * FROM titles');
     
-    const accuracy = stats[0].total_answers > 0 
-        ? (stats[0].correct_answers / stats[0].total_answers) * 100 
-        : 0;
+    for (const title of allTitles) {
+        if (earnedTitleIds.includes(title.id)) continue;
+        
+        let eligible = false;
+        
+        switch (title.requirement_type) {
+            case 'total_score':
+                eligible = userStats.total_points_earned >= title.requirement_value;
+                break;
+            case 'perfect_scores':
+                const [perfectScores] = await connection.query(
+                    'SELECT COUNT(*) as count FROM user_quiz_attempts WHERE user_id = ? AND percentage = 100',
+                    [userId]
+                );
+                eligible = perfectScores[0].count >= title.requirement_value;
+                break;
+            case 'categories_completed':
+                const [categoriesCompleted] = await connection.query(
+                    'SELECT COUNT(DISTINCT category_id) as count FROM user_quiz_attempts WHERE user_id = ?',
+                    [userId]
+                );
+                eligible = categoriesCompleted[0].count >= title.requirement_value;
+                break;
+        }
+        
+        if (eligible) {
+            await connection.query(
+                'INSERT INTO user_titles (user_id, title_id) VALUES (?, ?)',
+                [userId, title.id]
+            );
+            newTitles.push(title);
+        }
+    }
     
-    // Update or insert leaderboard entry
-    await promiseDb.query(
-        `INSERT INTO leaderboard (user_id, user_name, total_points, quizzes_completed, accuracy)
-         VALUES (?, (SELECT username FROM users WHERE id = ?), ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-         total_points = VALUES(total_points),
-         quizzes_completed = VALUES(quizzes_completed),
-         accuracy = VALUES(accuracy)`,
-        [userId, userId, stats[0].total_points_earned, stats[0].total_quizzes_taken, accuracy]
-    );
-    
-    // Update rankings
-    await promiseDb.query(`
-        SET @rank = 0;
-        UPDATE leaderboard 
-        SET rank_position = (@rank := @rank + 1)
-        ORDER BY total_points DESC;
-    `);
+    return newTitles;
+}
+
+function getPreviousDate(date) {
+    const d = new Date(date);
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
 }
 
 module.exports = router;
